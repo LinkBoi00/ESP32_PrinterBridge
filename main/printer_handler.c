@@ -11,6 +11,8 @@
 #include "esp_log.h"
 #include "esp_intr_alloc.h"
 #include "usb/usb_host.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #include "test/test_page_small.h"
 
@@ -27,7 +29,8 @@ typedef struct {
     usb_host_client_handle_t client_hdl;
     uint8_t interface_number;
     uint8_t bulk_out_ep;
-    uint8_t bulk_in_ep;         // NULL if unidirectional
+    uint8_t bulk_in_ep;                     // NULL if unidirectional
+    SemaphoreHandle_t transfer_done_sem;    // Semaphore for transfer syncronization
 } printer_device_t;
 
 static printer_device_t saved_printer;
@@ -171,6 +174,13 @@ static void save_printer_endpoint_details(usb_device_handle_t dev_hdl, usb_host_
         return;
     }
 
+    // Create semaphore for transfer synchronization
+    printer.transfer_done_sem = xSemaphoreCreateBinary();
+    if (printer.transfer_done_sem == NULL) {
+        ESP_LOGE(TAG, "Failed to create transfer semaphore");
+        return;
+    }
+
     // Save to static array
     saved_printer = printer;
 
@@ -241,7 +251,14 @@ esp_err_t send_print_job(void) {
         return ret;
     }
 
-    printf(TAG, "Print job sent successfully!");
+    printf("Print job sent successfully!");
+
+    // Wait for transfer to complete (with timeout)
+    if (xSemaphoreTake(saved_printer.transfer_done_sem, pdMS_TO_TICKS(5000)) != pdTRUE) {
+        ESP_LOGE(TAG, "Transfer timeout");
+        usb_host_interface_release(saved_printer.client_hdl, saved_printer.dev_hdl, saved_printer.interface_number);
+        return ESP_ERR_TIMEOUT;
+    }
 
     return ESP_OK;
 }
@@ -256,6 +273,14 @@ static void print_transfer_callback(usb_transfer_t *transfer) {
 
     // Clean up transfer
     usb_host_transfer_free(transfer);
+
+    // Release the interface
+    usb_host_interface_release(saved_printer.client_hdl, saved_printer.dev_hdl, saved_printer.interface_number);
+
+    // Signal that transfer is done
+    if (saved_printer.transfer_done_sem != NULL) {
+        xSemaphoreGive(saved_printer.transfer_done_sem);
+    }
 
     ESP_LOGI(TAG, "Print job completed!");
 }
