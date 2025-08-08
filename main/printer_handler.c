@@ -230,9 +230,14 @@ esp_err_t send_print_job(void) {
     // Wait for transfer to complete (with timeout)
     if (xSemaphoreTake(saved_printer.transfer_done_sem, pdMS_TO_TICKS(5000)) != pdTRUE) {
         ESP_LOGE(TAG, "Transfer timeout");
+        usb_host_transfer_free(transfer);
         usb_host_interface_release(saved_printer.client_hdl, saved_printer.dev_hdl, saved_printer.interface_number);
         return ESP_ERR_TIMEOUT;
     }
+
+    // Clean up transfer and release the interface after waiting for the semaphore
+    usb_host_transfer_free(transfer);
+    usb_host_interface_release(saved_printer.client_hdl, saved_printer.dev_hdl, saved_printer.interface_number);
 
     return ESP_OK;
 }
@@ -244,12 +249,6 @@ static void print_transfer_callback(usb_transfer_t *transfer) {
     } else {
         ESP_LOGE(TAG, "Print transfer failed with status: %d", transfer->status);
     }
-
-    // Clean up transfer
-    usb_host_transfer_free(transfer);
-
-    // Release the interface
-    usb_host_interface_release(saved_printer.client_hdl, saved_printer.dev_hdl, saved_printer.interface_number);
 
     // Signal that transfer is done
     if (saved_printer.transfer_done_sem != NULL) {
