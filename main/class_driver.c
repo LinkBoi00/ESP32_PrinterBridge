@@ -10,6 +10,8 @@
 #include "esp_log.h"
 #include "usb/usb_host.h"
 
+bool check_device_for_printer_interfaces(usb_device_handle_t dev_hdl, usb_host_client_handle_t client_hdl);
+
 #define CLIENT_NUM_EVENT_MSG        5
 
 typedef enum {
@@ -18,7 +20,8 @@ typedef enum {
     ACTION_GET_DEV_DESC     = (1 << 2),
     ACTION_GET_CONFIG_DESC  = (1 << 3),
     ACTION_GET_STR_DESC     = (1 << 4),
-    ACTION_CLOSE_DEV        = (1 << 5),
+    ACTION_HANDLE_PRINTER   = (1 << 5),
+    ACTION_CLOSE_DEV        = (1 << 6),
 } action_t;
 
 #define DEV_MAX_COUNT           128
@@ -157,6 +160,17 @@ static void action_get_str_desc(usb_device_t *device_obj)
         ESP_LOGI(TAG, "Getting Serial Number string descriptor");
         usb_print_string_descriptor(dev_info.str_desc_serial_num);
     }
+
+    // EDIT: Handle USB printer
+    device_obj->actions |= ACTION_HANDLE_PRINTER;
+}
+
+// EDIT: Handle USB printer
+// Uses functions from printer_handler.c
+static void action_handle_printer(usb_device_t *device_obj)
+{
+    // Check if the connected USB device is a printer
+    bool ret = check_device_for_printer_interfaces(device_obj->dev_hdl, device_obj->client_hdl);
 }
 
 static void action_close_dev(usb_device_t *device_obj)
@@ -186,6 +200,10 @@ static void class_driver_device_handle(usb_device_t *device_obj)
         }
         if (actions & ACTION_GET_STR_DESC) {
             action_get_str_desc(device_obj);
+        }
+        // EDIT: Handle USB printer
+        if (actions & ACTION_HANDLE_PRINTER) {
+            action_handle_printer(device_obj);
         }
         if (actions & ACTION_CLOSE_DEV) {
             action_close_dev(device_obj);
