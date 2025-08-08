@@ -1,0 +1,10 @@
+# Build directories
+build/
+.cache/
+
+# Build files
+sdkconfig
+sdkconfig.old
+
+# VSCode directory
+.vscode/
