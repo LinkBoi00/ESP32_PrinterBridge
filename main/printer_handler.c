@@ -12,6 +12,8 @@
 #include "esp_intr_alloc.h"
 #include "usb/usb_host.h"
 
+#include "test/test_page_small.h"
+
 static const char *TAG = "Printer handler";
 
 // Definitions taken from https://www.usb.org/sites/default/files/usbprint11a021811.pdf
@@ -34,6 +36,7 @@ static uint8_t is_printer_interface(const usb_intf_desc_t* intf_desc);
 static void save_printer_endpoint_details(usb_device_handle_t dev_hdl, usb_host_client_handle_t client_hdl,
                                             uint8_t interface_num, const usb_intf_desc_t *intf_desc,
                                             const usb_config_desc_t *config_desc);
+static void print_transfer_callback(usb_transfer_t *transfer);
 
 // Function that checks whether a USB device has printer interfaces
 // Returns the printer device if successfull, else NULL
@@ -177,4 +180,82 @@ static void save_printer_endpoint_details(usb_device_handle_t dev_hdl, usb_host_
     if (printer.bulk_in_ep != 0xFF) {
         ESP_LOGI(TAG, "  Bulk IN:  0x%02x", printer.bulk_in_ep);
     }
+}
+
+// Function that sends a print job to the saved printer
+esp_err_t send_print_job(void) {
+    if (saved_printer.dev_hdl == NULL) {
+        ESP_LOGE(TAG, "No printer device available");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (saved_printer.bulk_out_ep == 0xFF) {
+        ESP_LOGE(TAG, "No valid bulk OUT endpoint");
+        return ESP_ERR_INVALID_STATE;
+    }    
+
+    ESP_LOGI(TAG, "Starting print job...");
+    ESP_LOGI(TAG, "Printer details:");
+    ESP_LOGI(TAG, "  Interface: %d", saved_printer.interface_number);
+    ESP_LOGI(TAG, "  Bulk OUT EP: 0x%02x", saved_printer.bulk_out_ep);
+    ESP_LOGI(TAG, "  Data size: %d bytes", test_print_data_size);
+
+    // Claim the printer interface
+    esp_err_t ret = usb_host_interface_claim(saved_printer.client_hdl, 
+                                           saved_printer.dev_hdl, 
+                                           saved_printer.interface_number, 
+                                           0);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to claim printer interface: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "Successfully claimed printer interface");
+
+    // Allocate transfer for sending print data
+    usb_transfer_t *transfer = NULL;
+    ret = usb_host_transfer_alloc(test_print_data_size, 0, &transfer);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to allocate transfer: %s", esp_err_to_name(ret));
+        usb_host_interface_release(saved_printer.client_hdl, saved_printer.dev_hdl, saved_printer.interface_number);
+        return ret;
+    }
+    
+    // Set up the transfer
+    transfer->device_handle = saved_printer.dev_hdl;
+    transfer->bEndpointAddress = saved_printer.bulk_out_ep;
+    transfer->callback = print_transfer_callback;
+    transfer->context = NULL;
+    transfer->num_bytes = test_print_data_size;
+
+    // Copy print data to transfer buffer
+    memcpy(transfer->data_buffer, test_print_data, test_print_data_size);
+
+    ESP_LOGI(TAG, "Sending print data to endpoint 0x%02x...", saved_printer.bulk_out_ep);
+
+    // Submit the transfer
+    ret = usb_host_transfer_submit(transfer);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to submit transfer: %s", esp_err_to_name(ret));
+        usb_host_transfer_free(transfer);
+        usb_host_interface_release(saved_printer.client_hdl, saved_printer.dev_hdl, saved_printer.interface_number);
+        return ret;
+    }
+
+    printf(TAG, "Print job sent successfully!");
+
+    return ESP_OK;
+}
+
+static void print_transfer_callback(usb_transfer_t *transfer) {
+    if (transfer->status == USB_TRANSFER_STATUS_COMPLETED) {
+        ESP_LOGI(TAG, "Print transfer completed successfully!");
+        ESP_LOGI(TAG, "Sent %d bytes to printer", transfer->actual_num_bytes);
+    } else {
+        ESP_LOGE(TAG, "Print transfer failed with status: %d", transfer->status);
+    }
+
+    // Clean up transfer
+    usb_host_transfer_free(transfer);
+
+    ESP_LOGI(TAG, "Print job completed!");
 }

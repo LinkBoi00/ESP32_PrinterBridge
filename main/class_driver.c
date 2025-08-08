@@ -11,6 +11,7 @@
 #include "usb/usb_host.h"
 
 bool check_device_for_printer_interfaces(usb_device_handle_t dev_hdl, usb_host_client_handle_t client_hdl);
+esp_err_t send_print_job(void);
 
 #define CLIENT_NUM_EVENT_MSG        5
 
@@ -171,6 +172,13 @@ static void action_handle_printer(usb_device_t *device_obj)
 {
     // Check if the connected USB device is a printer
     bool ret = check_device_for_printer_interfaces(device_obj->dev_hdl, device_obj->client_hdl);
+
+    // If it is a printer, start handling print jobs (WIP)
+    if (ret) {
+        send_print_job();
+    } else {
+        device_obj->actions |= ACTION_CLOSE_DEV;
+    }
 }
 
 static void action_close_dev(usb_device_t *device_obj)
