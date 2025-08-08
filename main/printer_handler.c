@@ -35,7 +35,6 @@ typedef struct {
 
 static printer_device_t saved_printer;
 
-static uint8_t is_printer_interface(const usb_intf_desc_t* intf_desc);
 static void save_printer_endpoint_details(usb_device_handle_t dev_hdl, usb_host_client_handle_t client_hdl,
                                             uint8_t interface_num, const usb_intf_desc_t *intf_desc,
                                             const usb_config_desc_t *config_desc);
@@ -79,12 +78,16 @@ bool check_device_for_printer_interfaces(usb_device_handle_t dev_hdl, usb_host_c
                  i, intf_desc->bInterfaceClass, intf_desc->bInterfaceSubClass, intf_desc->bInterfaceProtocol);
 
         // Check if interface is a printer
-        if (is_printer_interface(intf_desc)) {
+        if (intf_desc->bInterfaceClass == USB_CLASS_PRINTER) {
             ESP_LOGI(TAG, "*** This is a PRINTER device! Interface %d ***", i);
+            printf("Found Printer Interface!\n");
+            printf("  Interface Class: 0x%02x (Printer)\n", intf_desc->bInterfaceClass);
+            printf("  Interface SubClass: 0x%02x\n", intf_desc->bInterfaceSubClass);
+            printf("  Interface Protocol: 0x%02x\n", intf_desc->bInterfaceProtocol);
             is_printer = true;
 
             // Handle bi-directional communication (TODO)
-            if (is_printer == USB_PRINTER_PROTOCOL_BI) {
+            if (intf_desc->bInterfaceProtocol == USB_PRINTER_PROTOCOL_BI) {
                 ESP_LOGI(TAG, "Printer supports bi-directional communication (TODO)");
             }
 
@@ -100,35 +103,6 @@ bool check_device_for_printer_interfaces(usb_device_handle_t dev_hdl, usb_host_c
     }
 
     return is_printer;
-}
-
-// Helper function which checks for a printer interface and returns its protocol
-// TODO: Implement bi-directional communication
-static uint8_t is_printer_interface(const usb_intf_desc_t* intf_desc) {
-    if (intf_desc->bInterfaceClass == USB_CLASS_PRINTER) {
-        printf("Found Printer Interface!\n");
-        printf("  Interface Class: 0x%02x (Printer)\n", intf_desc->bInterfaceClass);
-        printf("  Interface SubClass: 0x%02x\n", intf_desc->bInterfaceSubClass);
-        printf("  Interface Protocol: 0x%02x", intf_desc->bInterfaceProtocol);
-
-        switch (intf_desc->bInterfaceProtocol) {
-            case USB_PRINTER_PROTOCOL_UNI:
-                printf(" (Unidirectional)\n");
-                break;
-            case USB_PRINTER_PROTOCOL_BI:
-                printf(" (Bidirectional)\n");
-                break;
-            case USB_PRINTER_PROTOCOL_1284:
-                printf(" (IEEE 1284.4 compatible bi-directional)\n");
-                break;
-            default:
-                printf(" (Unknown)\n");
-                break;
-        }
-        return intf_desc->bInterfaceProtocol;
-    }
-
-    return 0;
 }
 
 // Helper function that saves a printer's details to our struct
@@ -251,7 +225,7 @@ esp_err_t send_print_job(void) {
         return ret;
     }
 
-    printf("Print job sent successfully!");
+    ESP_LOGI(TAG, "Print job sent successfully!");
 
     // Wait for transfer to complete (with timeout)
     if (xSemaphoreTake(saved_printer.transfer_done_sem, pdMS_TO_TICKS(5000)) != pdTRUE) {
